@@ -17,6 +17,22 @@ from scratchv.ir.types import Program
 
 ALLOCATOR_MODULES = (regalloc_linear, regalloc_linear_v1_5)
 
+RV32IM_MACHINE_PSEUDOS = {
+    MachineOp.MV,
+    MachineOp.LI,
+    MachineOp.MAX,
+    MachineOp.BNEZ,
+    MachineOp.J,
+    MachineOp.CALL,
+}
+STRUCTURAL_MACHINE_PSEUDOS = {MachineOp.LABEL}
+EXTERNAL_EXTENSION_PSEUDOS = {
+    MachineOp.FABS_D,
+    MachineOp.FNEG_D,
+    MachineOp.LI_D,
+    MachineOp.FMV_S,
+}
+
 
 def _run_rv32(assembly: str, instruction_limit: int = 16):
     pytest.importorskip("tinyfive")
@@ -31,6 +47,242 @@ def _run_rv32(assembly: str, instruction_limit: int = 16):
     machine.load_binary(words, origin=0)
     machine.run(instructions=instruction_limit, start=0, strict=True)
     return machine
+
+
+def _allocate_and_run(
+    allocator_module,
+    instructions: list[MachineInstr],
+    *,
+    instruction_limit: int = 16,
+):
+    """Run Machine IR through allocation, encoding, and TinyFive."""
+    block = allocator_module.block_from_machine_instrs(instructions)
+    allocator = allocator_module.LinearScanAllocator(["t0", "t1", "t2"])
+    assembly = allocator.emit(block)
+    binary = RISCVAEncoder().assemble(assembly)
+    machine = _run_rv32(assembly, instruction_limit=instruction_limit)
+    return machine, assembly, binary
+
+
+def test_every_semantic_pseudo_has_an_explicit_target_disposition():
+    semantic_pseudos = {
+        opcode for opcode, semantics in OP_SEM.items() if semantics.is_pseudo
+    }
+
+    assert semantic_pseudos == (
+        RV32IM_MACHINE_PSEUDOS
+        | STRUCTURAL_MACHINE_PSEUDOS
+        | EXTERNAL_EXTENSION_PSEUDOS
+    )
+
+
+@pytest.mark.parametrize("allocator_module", ALLOCATOR_MODULES)
+def test_mv_full_pipeline_executes_after_register_allocation(allocator_module):
+    v = MachineOperand.vreg
+    instructions = [
+        MachineInstr(MachineOp.LI, v("source"), MachineOperand.immediate(42)),
+        MachineInstr(MachineOp.MV, v("copy"), v("source")),
+        MachineInstr(MachineOp.MV, MachineOperand.reg("a0"), v("copy")),
+        MachineInstr(MachineOp.LABEL, comment=".done"),
+        MachineInstr(MachineOp.J, comment=".done"),
+    ]
+
+    machine, assembly, _ = _allocate_and_run(allocator_module, instructions)
+
+    assert "%" not in assembly
+    assert machine.get_reg(10) == 42  # a0 / x10
+
+
+@pytest.mark.parametrize("allocator_module", ALLOCATOR_MODULES)
+def test_li_full_pipeline_executes_after_register_allocation(allocator_module):
+    v = MachineOperand.vreg
+    instructions = [
+        MachineInstr(
+            MachineOp.LI,
+            v("constant"),
+            MachineOperand.immediate(0x12345),
+        ),
+        MachineInstr(MachineOp.MV, MachineOperand.reg("a0"), v("constant")),
+        MachineInstr(MachineOp.LABEL, comment=".done"),
+        MachineInstr(MachineOp.J, comment=".done"),
+    ]
+
+    machine, _, binary = _allocate_and_run(allocator_module, instructions)
+
+    assert len(binary) == 16  # large li is two words, then mv and j
+    assert machine.get_reg(10) == 0x12345
+
+
+@pytest.mark.parametrize("allocator_module", ALLOCATOR_MODULES)
+def test_max_full_pipeline_executes_after_register_allocation(allocator_module):
+    v = MachineOperand.vreg
+    instructions = [
+        MachineInstr(MachineOp.LI, v("left"), MachineOperand.immediate(-4)),
+        MachineInstr(MachineOp.LI, v("right"), MachineOperand.immediate(-2)),
+        MachineInstr(MachineOp.MAX, v("result"), v("left"), v("right")),
+        MachineInstr(MachineOp.MV, MachineOperand.reg("a0"), v("result")),
+        MachineInstr(MachineOp.LABEL, comment=".done"),
+        MachineInstr(MachineOp.J, comment=".done"),
+    ]
+
+    machine, assembly, _ = _allocate_and_run(allocator_module, instructions)
+
+    assert "max " in assembly
+    assert machine.get_reg(10) == -2
+
+
+@pytest.mark.parametrize("allocator_module", ALLOCATOR_MODULES)
+@pytest.mark.parametrize("condition, expected", [(0, 1), (5, 2)])
+def test_bnez_full_pipeline_executes_both_paths(
+    allocator_module, condition, expected
+):
+    v = MachineOperand.vreg
+    imm = MachineOperand.immediate
+    instructions = [
+        MachineInstr(MachineOp.LI, v("condition"), imm(condition)),
+        MachineInstr(MachineOp.LI, MachineOperand.reg("a0"), imm(0)),
+        MachineInstr(MachineOp.BNEZ, v("condition"), comment=".taken"),
+        MachineInstr(MachineOp.LI, MachineOperand.reg("a0"), imm(1)),
+        MachineInstr(MachineOp.J, comment=".done"),
+        MachineInstr(MachineOp.LABEL, comment=".taken"),
+        MachineInstr(MachineOp.LI, MachineOperand.reg("a0"), imm(2)),
+        MachineInstr(MachineOp.LABEL, comment=".done"),
+        MachineInstr(MachineOp.J, comment=".done"),
+    ]
+
+    machine, _, _ = _allocate_and_run(allocator_module, instructions)
+
+    assert machine.get_reg(10) == expected
+
+
+@pytest.mark.parametrize("allocator_module", ALLOCATOR_MODULES)
+def test_j_full_pipeline_executes_without_fallthrough(allocator_module):
+    imm = MachineOperand.immediate
+    a0 = MachineOperand.reg("a0")
+    instructions = [
+        MachineInstr(MachineOp.LI, a0, imm(0)),
+        MachineInstr(MachineOp.J, comment=".target"),
+        MachineInstr(MachineOp.LI, a0, imm(1)),
+        MachineInstr(MachineOp.LABEL, comment=".target"),
+        MachineInstr(MachineOp.LI, a0, imm(2)),
+        MachineInstr(MachineOp.LABEL, comment=".done"),
+        MachineInstr(MachineOp.J, comment=".done"),
+    ]
+
+    machine, _, _ = _allocate_and_run(allocator_module, instructions)
+
+    assert machine.get_reg(10) == 2
+
+
+@pytest.mark.parametrize("allocator_module", ALLOCATOR_MODULES)
+def test_call_full_pipeline_jumps_links_and_returns(allocator_module):
+    imm = MachineOperand.immediate
+    a0 = MachineOperand.reg("a0")
+    instructions = [
+        MachineInstr(MachineOp.LI, a0, imm(1)),
+        MachineInstr(MachineOp.CALL, comment=".callee"),
+        MachineInstr(MachineOp.ADDI, a0, a0, imm(10)),
+        MachineInstr(MachineOp.J, comment=".done"),
+        MachineInstr(MachineOp.LABEL, comment=".callee"),
+        MachineInstr(MachineOp.ADDI, a0, a0, imm(2)),
+        MachineInstr(
+            MachineOp.JALR,
+            MachineOperand.reg("zero"),
+            MachineOperand.reg("ra"),
+            imm(0),
+        ),
+        MachineInstr(MachineOp.LABEL, comment=".done"),
+        MachineInstr(MachineOp.J, comment=".done"),
+    ]
+
+    machine, assembly, _ = _allocate_and_run(allocator_module, instructions)
+
+    assert "call .callee" in assembly
+    assert machine.get_reg(1) == 8  # ra points after the call at PC=4
+    assert machine.get_reg(10) == 13
+
+
+@pytest.mark.parametrize("allocator_module", ALLOCATOR_MODULES)
+def test_label_full_pipeline_is_zero_bytes_and_execution_continues(
+    allocator_module,
+):
+    instructions = [
+        MachineInstr(MachineOp.LABEL, comment=".entry"),
+        MachineInstr(
+            MachineOp.LI,
+            MachineOperand.reg("a0"),
+            MachineOperand.immediate(17),
+        ),
+        MachineInstr(MachineOp.LABEL, comment=".done"),
+        MachineInstr(MachineOp.J, comment=".done"),
+    ]
+
+    machine, _, binary = _allocate_and_run(allocator_module, instructions)
+
+    assert len(binary) == 8  # li + j; both labels emit no machine word
+    assert machine.get_reg(10) == 17
+
+
+@pytest.mark.parametrize(
+    "opcode, operands, extension",
+    [
+        (MachineOp.FABS_D, ("result", "source"), "D"),
+        (MachineOp.FNEG_D, ("result", "source"), "D"),
+        (MachineOp.LI_D, ("result", 1), "D"),
+        (MachineOp.FMV_S, ("result", "source"), "F"),
+    ],
+)
+def test_external_extension_pseudo_is_explicitly_rejected_by_rv32im_encoder(
+    opcode, operands, extension
+):
+    dst = MachineOperand.vreg(operands[0])
+    src = (
+        MachineOperand.immediate(operands[1])
+        if isinstance(operands[1], int)
+        else MachineOperand.vreg(operands[1])
+    )
+    instruction = MachineInstr(opcode, dst, src)
+    block = regalloc_linear.block_from_machine_instrs([instruction])
+    assembly = regalloc_linear.LinearScanAllocator(["t0", "t1"]).emit(block)
+
+    with pytest.raises(
+        ValueError,
+        match=rf"{opcode.value} requires the RISC-V {extension} extension",
+    ):
+        RISCVAEncoder().assemble(assembly)
+
+
+def test_nop_assembler_pseudo_encodes_and_executes_as_addi_zero():
+    pseudo = "li t0, 41\nnop\naddi t0, t0, 1\n.done:\nj .done"
+    expanded = (
+        "li t0, 41\naddi x0, x0, 0\naddi t0, t0, 1\n.done:\n"
+        "jal x0, .done"
+    )
+
+    assert RISCVAEncoder().assemble(pseudo) == RISCVAEncoder().assemble(
+        expanded
+    )
+    assert _run_rv32(pseudo).get_reg(5) == 42
+
+
+def test_ret_assembler_pseudo_encodes_and_executes_as_jalr():
+    assert RISCVAEncoder().assemble("ret") == RISCVAEncoder().assemble(
+        "jalr x0, ra, 0"
+    )
+
+    machine = _run_rv32(
+        "li a0, 1\n"
+        "jal ra, .callee\n"
+        "addi a0, a0, 10\n"
+        "j .done\n"
+        ".callee:\n"
+        "addi a0, a0, 2\n"
+        "ret\n"
+        ".done:\n"
+        "j .done"
+    )
+
+    assert machine.get_reg(10) == 13
 
 
 @pytest.mark.parametrize("allocator_module", ALLOCATOR_MODULES)

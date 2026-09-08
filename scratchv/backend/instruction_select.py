@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from scratchv.ir.types import Instruction, Function, Program
 from scratchv.backend.machine_types import (
-    MachineInstr, MachineOp, MachineOperand,
+    MachineInstr,
+    MachineOp,
+    MachineOperand,
 )
 
 
@@ -48,14 +50,13 @@ class InstructionSelector:
     def _select_instruction(self, instr: Instruction) -> None:
         handler = getattr(self, f"_select_{instr.opcode.value}", None)
         if handler is None:
-            raise ValueError(
-                f"No instruction selection for opcode: {instr.opcode}")
+            raise ValueError(f"No instruction selection for opcode: {instr.opcode}")
         handler(instr)
 
-    def _emit(self, op: MachineOp, dst=None, src1=None, src2=None,
-              comment: str = "") -> None:
-        self._instructions.append(
-            MachineInstr(op, dst, src1, src2, comment))
+    def _emit(
+        self, op: MachineOp, dst=None, src1=None, src2=None, comment: str = ""
+    ) -> None:
+        self._instructions.append(MachineInstr(op, dst, src1, src2, comment))
 
     def _emit_move(self, dst: MachineOperand, src: MachineOperand,
                    comment: str = "") -> None:
@@ -107,8 +108,7 @@ class InstructionSelector:
         self._emit(MachineOp.MAX, dst, lhs, rhs, comment=comment)
 
     def _emit_label(self, name: str) -> None:
-        self._instructions.append(
-            MachineInstr(MachineOp.LABEL, comment=name))
+        self._instructions.append(MachineInstr(MachineOp.LABEL, comment=name))
 
     def _op(self, instr: Instruction, idx: int):
         """Get an operand from an IR instruction as a machine operand."""
@@ -131,30 +131,41 @@ class InstructionSelector:
         val = int(raw_val)
         dst = self._dst(instr)
         # LI pseudo-instruction (expands to addi x0, imm or lui+addi)
-        self._emit(MachineOp.LI, dst,
-                   MachineOperand.immediate(int(val)),
-                   comment=f"const {val}")
+        self._emit(
+            MachineOp.LI,
+            dst,
+            MachineOperand.immediate(int(val)),
+            comment=f"const {val}",
+        )
 
     def _select_add(self, instr: Instruction) -> None:
-        self._emit(MachineOp.ADD, self._dst(instr),
-                   self._op(instr, 0), self._op(instr, 1))
+        self._emit(
+            MachineOp.ADD, self._dst(instr), self._op(instr, 0), self._op(instr, 1)
+        )
 
     def _select_sub(self, instr: Instruction) -> None:
-        self._emit(MachineOp.SUB, self._dst(instr),
-                   self._op(instr, 0), self._op(instr, 1))
+        self._emit(
+            MachineOp.SUB, self._dst(instr), self._op(instr, 0), self._op(instr, 1)
+        )
 
     def _select_mul(self, instr: Instruction) -> None:
-        self._emit(MachineOp.MUL, self._dst(instr),
-                   self._op(instr, 0), self._op(instr, 1))
+        self._emit(
+            MachineOp.MUL, self._dst(instr), self._op(instr, 0), self._op(instr, 1)
+        )
 
     def _select_div(self, instr: Instruction) -> None:
-        self._emit(MachineOp.DIV, self._dst(instr),
-                   self._op(instr, 0), self._op(instr, 1))
+        self._emit(
+            MachineOp.DIV, self._dst(instr), self._op(instr, 0), self._op(instr, 1)
+        )
 
     def _select_neg(self, instr: Instruction) -> None:
         # RISC-V: sub rd, x0, rs
-        self._emit(MachineOp.SUB, self._dst(instr),
-                   MachineOperand.immediate(0), self._op(instr, 0))
+        self._emit(
+            MachineOp.SUB,
+            self._dst(instr),
+            MachineOperand.immediate(0),
+            self._op(instr, 0),
+        )
 
     def _select_exp(self, instr: Instruction) -> None:
         # exp(x) approximated as max(0, 1+x) for simplicity (pure RV32I)
@@ -162,11 +173,16 @@ class InstructionSelector:
         dst = self._dst(instr)
         if dst is None:
             return
-        self._emit(MachineOp.ADDI, dst, src,
-                   MachineOperand.immediate(1),
-                   comment="exp approx: 1+x")
-        self._emit_max(dst, dst, MachineOperand.immediate(0),
-                       comment="relu clamp")
+        self._emit(
+            MachineOp.ADDI,
+            dst,
+            src,
+            MachineOperand.immediate(1),
+            comment="exp approx: 1+x",
+        )
+        self._emit_max(
+            dst, dst, MachineOperand.immediate(0), comment="relu clamp"
+        )
 
     def _select_relu(self, instr: Instruction) -> None:
         """ReLU(x) = max(x, 0).  Use:  max rd, rs, x0"""
@@ -181,13 +197,11 @@ class InstructionSelector:
         if dst is None:
             return
         tmp = MachineOperand.vreg("tmp_gelu")
-        self._emit_max(tmp, src, MachineOperand.immediate(0),
-                       comment="relu(x)")
-        self._emit(MachineOp.MUL, dst, src, tmp,
-                   comment="x * relu(x)")
-        self._emit(MachineOp.DIV, dst, dst,
-                   MachineOperand.immediate(2),
-                   comment="/ 2")
+        self._emit_max(
+            tmp, src, MachineOperand.immediate(0), comment="relu(x)"
+        )
+        self._emit(MachineOp.MUL, dst, src, tmp, comment="x * relu(x)")
+        self._emit(MachineOp.DIV, dst, dst, MachineOperand.immediate(2), comment="/ 2")
 
     def _select_softmax(self, instr: Instruction) -> None:
         # softmax ≈ identity (pure RV32I passthrough)
@@ -215,8 +229,13 @@ class InstructionSelector:
         size = raw_size
         dst = self._dst(instr)
         # Subtract from sp to allocate
-        self._emit(MachineOp.ADDI, dst, MachineOperand.vreg("sp"),
-                   MachineOperand.immediate(-size), comment=f"alloca {size}")
+        self._emit(
+            MachineOp.ADDI,
+            dst,
+            MachineOperand.vreg("sp"),
+            MachineOperand.immediate(-size),
+            comment=f"alloca {size}",
+        )
 
     def _select_for(self, instr: Instruction) -> None:
         """Begin a for loop: set up loop variable and branch to loop header."""
@@ -234,8 +253,9 @@ class InstructionSelector:
         exit_label = self._fresh_label("loop_exit")
 
         # Initialize loop variable
-        self._emit(MachineOp.LI, iv, MachineOperand.immediate(start),
-                   comment="loop init")
+        self._emit(
+            MachineOp.LI, iv, MachineOperand.immediate(start), comment="loop init"
+        )
 
         # Branch to loop body
         # Store loop context for endfor to use
@@ -262,8 +282,9 @@ class InstructionSelector:
 
         iv = ctx["iv"]
         # Increment: addi iv, iv, 1
-        self._emit(MachineOp.ADDI, iv, iv, MachineOperand.immediate(1),
-                   comment="loop inc")
+        self._emit(
+            MachineOp.ADDI, iv, iv, MachineOperand.immediate(1), comment="loop inc"
+        )
         # Jump back to header
         self._emit(MachineOp.J, comment=ctx["header"])
         # Exit label
@@ -289,24 +310,26 @@ class InstructionSelector:
                 self._op(instr, 0),
                 comment="return value",
             )
-        self._emit(MachineOp.JALR, MachineOperand.reg("zero"),
-                   MachineOperand.reg("ra"), comment="ret")
+        self._emit(
+            MachineOp.JALR,
+            MachineOperand.reg("zero"),
+            MachineOperand.reg("ra"),
+            comment="ret",
+        )
 
     def _select_matmul(self, instr: Instruction) -> None:
         a_reg = self._op(instr, 0)
         b_reg = self._op(instr, 1)
         dst = self._dst(instr)
         if dst:
-            self._emit(MachineOp.MUL, dst, a_reg, b_reg,
-                       comment="matmul: a * b")
+            self._emit(MachineOp.MUL, dst, a_reg, b_reg, comment="matmul: a * b")
 
     def _select_dot(self, instr: Instruction) -> None:
         a_reg = self._op(instr, 0)
         b_reg = self._op(instr, 1)
         dst = self._dst(instr)
         if dst:
-            self._emit(MachineOp.MUL, dst, a_reg, b_reg,
-                       comment="dot: a * b")
+            self._emit(MachineOp.MUL, dst, a_reg, b_reg, comment="dot: a * b")
 
     def _select_label(self, instr: Instruction) -> None:
         self._emit_label(instr.target or "")
@@ -324,17 +347,15 @@ class InstructionSelector:
         # li dst, 1        → else clamp to 1
         # keep: mv dst, src
         keep_label = self._fresh_label("sig_keep")
-        self._emit(MachineOp.SLT,
-                   MachineOperand.vreg("t_sig"),
-                   src,
-                   MachineOperand.immediate(1),
-                   comment="src < 1 ?")
-        self._emit(MachineOp.BNEZ,
-                   MachineOperand.vreg("t_sig"),
-                   comment=keep_label)
-        self._emit(MachineOp.LI, dst,
-                   MachineOperand.immediate(1),
-                   comment="clamp to 1")
+        self._emit(
+            MachineOp.SLT,
+            MachineOperand.vreg("t_sig"),
+            src,
+            MachineOperand.immediate(1),
+            comment="src < 1 ?",
+        )
+        self._emit(MachineOp.BNEZ, MachineOperand.vreg("t_sig"), comment=keep_label)
+        self._emit(MachineOp.LI, dst, MachineOperand.immediate(1), comment="clamp to 1")
         # Branch over the mv
         done_label = self._fresh_label("sig_done")
         self._emit(MachineOp.J, comment=done_label)
@@ -342,18 +363,16 @@ class InstructionSelector:
         self._emit_move(dst, src, comment="keep src")
         self._emit_label(done_label)
         # Now dst = min(src, 1). If src < 0, result = 0
-        self._emit(MachineOp.SLT,
-                   MachineOperand.vreg("t_sig2"),
-                   MachineOperand.immediate(0),
-                   src,
-                   comment="0 < src ?")
+        self._emit(
+            MachineOp.SLT,
+            MachineOperand.vreg("t_sig2"),
+            MachineOperand.immediate(0),
+            src,
+            comment="0 < src ?",
+        )
         zero_label = self._fresh_label("sig_zero")
-        self._emit(MachineOp.BNEZ,
-                   MachineOperand.vreg("t_sig2"),
-                   comment=zero_label)
-        self._emit(MachineOp.LI, dst,
-                   MachineOperand.immediate(0),
-                   comment="clamp to 0")
+        self._emit(MachineOp.BNEZ, MachineOperand.vreg("t_sig2"), comment=zero_label)
+        self._emit(MachineOp.LI, dst, MachineOperand.immediate(0), comment="clamp to 0")
         self._emit_label(zero_label)
 
     def _select_conv(self, instr: Instruction) -> None:
@@ -367,11 +386,9 @@ class InstructionSelector:
             self._emit_move(dst, b_reg, comment="acc = bias")
             # tmp = x * w (MUL for MAC)
             tmp_vreg = MachineOperand.vreg("tmp_mac")
-            self._emit(MachineOp.MUL, tmp_vreg, x_reg, w_reg,
-                       comment="tmp = x * w")
+            self._emit(MachineOp.MUL, tmp_vreg, x_reg, w_reg, comment="tmp = x * w")
             # dst = dst + tmp (acc += x*w)
-            self._emit(MachineOp.ADD, dst, dst, tmp_vreg,
-                       comment="acc += x*w")
+            self._emit(MachineOp.ADD, dst, dst, tmp_vreg, comment="acc += x*w")
 
     def _select_gemm(self, instr: Instruction) -> None:
         """GEMM inline: real RISC-V MUL+ADD MAC."""
@@ -382,10 +399,8 @@ class InstructionSelector:
         if dst:
             self._emit_move(dst, b_reg, comment="acc = bias")
             tmp_vreg = MachineOperand.vreg("tmp_gemm")
-            self._emit(MachineOp.MUL, tmp_vreg, a_reg, w_reg,
-                       comment="tmp = a * w")
-            self._emit(MachineOp.ADD, dst, dst, tmp_vreg,
-                       comment="acc += a*w")
+            self._emit(MachineOp.MUL, tmp_vreg, a_reg, w_reg, comment="tmp = a * w")
+            self._emit(MachineOp.ADD, dst, dst, tmp_vreg, comment="acc += a*w")
 
     def _select_maxpool(self, instr: Instruction) -> None:
         """MaxPool inline: RISC-V SLT + branch → max."""
@@ -395,17 +410,15 @@ class InstructionSelector:
             return
         # max(x, 0) using SLT + branch
         gt_label = self._fresh_label("mp_gt")
-        self._emit(MachineOp.SLT,
-                   MachineOperand.vreg("t_mp"),
-                   MachineOperand.immediate(0),
-                   src,
-                   comment="0 < x ?")
-        self._emit(MachineOp.BNEZ,
-                   MachineOperand.vreg("t_mp"),
-                   comment=gt_label)
-        self._emit(MachineOp.LI, dst,
-                   MachineOperand.immediate(0),
-                   comment="result = 0")
+        self._emit(
+            MachineOp.SLT,
+            MachineOperand.vreg("t_mp"),
+            MachineOperand.immediate(0),
+            src,
+            comment="0 < x ?",
+        )
+        self._emit(MachineOp.BNEZ, MachineOperand.vreg("t_mp"), comment=gt_label)
+        self._emit(MachineOp.LI, dst, MachineOperand.immediate(0), comment="result = 0")
         done_label = self._fresh_label("mp_done")
         self._emit(MachineOp.J, comment=done_label)
         self._emit_label(gt_label)

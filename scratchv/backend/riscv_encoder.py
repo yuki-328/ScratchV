@@ -220,6 +220,26 @@ class RISCVAEncoder:
 
         op = tokens[0].lower()
 
+        # Keep every RV32IM pseudo lowering in this pass.  _encode_line()
+        # should only ever see real instructions, which makes it possible to
+        # test pseudo expansion independently from binary encoding.
+        if op == "mv":
+            if len(tokens) != 3:
+                raise ValueError("mv expects exactly 2 operands")
+            return [f"addi {tokens[1]}, {tokens[2]}, 0"]
+
+        if op == "bnez":
+            if len(tokens) != 3:
+                raise ValueError(
+                    "bnez expects exactly 2 operands: register and label"
+                )
+            return [f"bne {tokens[1]}, x0, {tokens[2]}"]
+
+        if op == "j":
+            if len(tokens) != 2:
+                raise ValueError("j expects exactly 1 operand: label")
+            return [f"jal x0, {tokens[1]}"]
+
         # A local ``call`` can be represented exactly by ``jal ra, label``.
         # This produces a real executable instruction and uses the same strict
         # label fixup/undefined-target checks as ordinary jumps.  A future ELF
@@ -233,7 +253,9 @@ class RISCVAEncoder:
         # canonical LUI/ADDI pair.  A single RISC-V instruction cannot encode
         # an arbitrary 32-bit immediate; keeping a large ``li`` as one encoded
         # word silently drops its low 12 bits.
-        if op == "li" and len(tokens) >= 3:
+        if op == "li":
+            if len(tokens) != 3:
+                raise ValueError("li expects exactly 2 operands")
             rd = tokens[1]
             imm = self._parse_imm(tokens[2])
             return self._expand_li(rd, imm)
@@ -268,11 +290,39 @@ class RISCVAEncoder:
             return [
                 f"bge {rs1}, {rhs}, {then_label}",
                 f"addi {rd}, {rhs}, 0",
-                f"j {end_label}",
+                f"jal x0, {end_label}",
                 f"{then_label}:",
                 f"addi {rd}, {rs1}, 0",
                 f"{end_label}:",
             ]
+
+        # These are genuine RISC-V pseudos used by assembly tooling even
+        # though the MachineOp layer currently emits JALR directly for return.
+        if op == "ret":
+            if len(tokens) != 1:
+                raise ValueError("ret expects no operands")
+            return ["jalr x0, ra, 0"]
+
+        if op == "nop":
+            if len(tokens) != 1:
+                raise ValueError("nop expects no operands")
+            return ["addi x0, x0, 0"]
+
+        # These pseudos belong to the optional floating-point backends.  Fail
+        # explicitly instead of letting RV32IM verification appear to cover
+        # assembly that this encoder and its TinyFive path cannot execute.
+        extension_pseudos = {
+            "fabs.d": "D",
+            "fneg.d": "D",
+            "li.d": "D",
+            "fmv.s": "F",
+        }
+        if op in extension_pseudos:
+            extension = extension_pseudos[op]
+            raise ValueError(
+                f"{op} requires the RISC-V {extension} extension; "
+                "RISCVAEncoder currently supports RV32IM only"
+            )
 
         # Branch-with-immediate:  beq/bne/blt/bge rs1, imm, label
         #   → li xTEMP, imm; beq/bne/blt/bge rs1, xTEMP, label
@@ -492,21 +542,6 @@ class RISCVAEncoder:
             label = operands[2]
             fixup = ("b", label)
             word = _b_type(rs1, rs2, 0, F3_BGE)
-        elif op == "bnez":
-            if len(operands) != 2:
-                raise ValueError(
-                    "bnez expects exactly 2 operands: register and label"
-                )
-            rs1 = _reg_num(operands[0])
-            label = operands[1]
-            fixup = ("b", label)
-            word = _b_type(rs1, 0, 0, F3_BNE)
-        elif op == "j":
-            if len(operands) != 1:
-                raise ValueError("j expects exactly 1 operand: label")
-            label = operands[0]
-            fixup = ("j", label)
-            word = _j_type(0, 0)
         elif op == "jal":
             if len(operands) == 1:
                 rd = 1
@@ -523,22 +558,6 @@ class RISCVAEncoder:
             rs1 = _reg_num(operands[1])
             offset = self._parse_imm(operands[2]) if len(operands) > 2 else 0
             word = _i_type(rd, rs1, offset, 0, RVOpcode.JALR)
-        elif op == "li":
-            raise ValueError("li must be expanded before encoding")
-        elif op == "mv":
-            rd = _reg_num(operands[0])
-            rs = _reg_num(operands[1])
-            word = _i_type(rd, rs, 0, F3_ADD_SUB)
-        elif op == "call":
-            if operands:
-                label = operands[0]
-                fixup = ("call", label)
-                word = _u_type(1, 0)
-            else:
-                word = _i_type(1, 1, 0, 0, RVOpcode.JALR)
-                fixup = ("runtime_call", "")
-        elif op == "ret":
-            word = _i_type(0, 1, 0, 0, RVOpcode.JALR)
         elif op == "lui":
             rd = _reg_num(operands[0])
             imm = self._parse_imm(operands[1])
@@ -552,8 +571,6 @@ class RISCVAEncoder:
             else:
                 imm = self._parse_imm(operands[2])
                 word = _i_type(rd, rs1, imm, F3_SLT)
-        elif op == "nop":
-            word = _i_type(0, 0, 0, F3_ADD_SUB)
         else:
             raise ValueError(f"Unknown instruction: {op}")
 
