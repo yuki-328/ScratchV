@@ -1,6 +1,6 @@
 {
   "completed_at": "2026-10-09T11:19:40.699363+08:00",
-  "scope": "Local Linux validation; W4 one complete full_seed_0 case and W3 seven complete reference-mode cases. No team acceptance or remote Nightly claim.",
+  "scope": "Fixed-commit Linux validation; W4 one complete full_seed_0 case and W3 seven complete reference-mode cases. No team acceptance or remote Nightly claim.",
   "branch": "codex/w4-full-runtime",
   "current_commit": "cf0f7d3e1287d4383bb2bd4356d9ae94a8320d75",
   "environment": {
@@ -8,7 +8,7 @@
     "cpu": "AMD Ryzen 5 7500F 6-Core Processor",
     "runtime": {
       "python": "3.12.3",
-      "executable": "/home/yuki/code/ScratchV/.venv-w4/bin/python",
+      "executable": ".venv-w4/bin/python",
       "platform": "Linux-7.0.0-28-generic-x86_64-with-glibc2.39",
       "versions": {
         "numpy": "2.2.6",
@@ -33,15 +33,53 @@
           "status": "available",
           "libraries": [
             {
-              "path": "/home/yuki/code/ScratchV/.venv-w4/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-56d6093b.so",
+              "path": ".venv-w4/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-56d6093b.so",
               "status": "available",
               "core_name": "SkylakeX",
               "config": "OpenBLAS 0.3.29  USE64BITINT DYNAMIC_ARCH NO_AFFINITY SkylakeX MAX_THREADS=64"
             }
           ]
         },
-        "numpy_build": "Build Dependencies:\n  blas:\n    detection method: pkgconfig\n    found: true\n    include directory: /opt/_internal/cpython-3.12.7/lib/python3.12/site-packages/scipy_openblas64/include\n    lib directory: /opt/_internal/cpython-3.12.7/lib/python3.12/site-packages/scipy_openblas64/lib\n    name: scipy-openblas\n    openblas configuration: OpenBLAS 0.3.29  USE64BITINT DYNAMIC_ARCH NO_AFFINITY\n      Haswell MAX_THREADS=64\n    pc file directory: /project/.openblas\n    version: 0.3.29\n  lapack:\n    detection method: pkgconfig\n    found: true\n    include directory: /opt/_internal/cpython-3.12.7/lib/python3.12/site-packages/scipy_openblas64/include\n    lib directory: /opt/_internal/cpython-3.12.7/lib/python3.12/site-packages/scipy_openblas64/lib\n    name: scipy-openblas\n    openblas configuration: OpenBLAS 0.3.29  USE64BITINT DYNAMIC_ARCH NO_AFFINITY\n      Haswell MAX_THREADS=64\n    pc file directory: /project/.openblas\n    version: 0.3.29\nCompilers:\n  c:\n    commands: cc\n    linker: ld.bfd\n    name: gcc\n    version: 10.2.1\n  c++:\n    commands: c++\n    linker: ld.bfd\n    name: gcc\n    version: 10.2.1\n  cython:\n    commands: cython\n    linker: cython\n    name: cython\n    version: 3.1.0\nMachine Information:\n  build:\n    cpu: x86_64\n    endian: little\n    family: x86_64\n    system: linux\n  host:\n    cpu: x86_64\n    endian: little\n    family: x86_64\n    system: linux\nPython Information:\n  path: /tmp/build-env-sgs8db9u/bin/python\n  version: '3.12'\nSIMD Extensions:\n  baseline:\n  - SSE\n  - SSE2\n  - SSE3\n  found:\n  - SSSE3\n  - SSE41\n  - POPCNT\n  - SSE42\n  - AVX\n  - F16C\n  - FMA3\n  - AVX2\n  - AVX512F\n  - AVX512CD\n  - AVX512_SKX\n  - AVX512_CLX\n  - AVX512_CNL\n  - AVX512_ICL\n  not found:\n  - AVX512_KNL\n  - AVX512_KNM",
-        "numpy_runtime": "WARNING: `threadpoolctl` not found in system! Install it by `pip install threadpoolctl`. Once installed, try `np.show_runtime` again for more detailed build information\n[{'numpy_version': '2.2.6',\n  'python': '3.12.3 (main, Jun 19 2026, 12:46:00) [GCC 13.3.0]',\n  'uname': uname_result(system='Linux', node='yuki-B650M', release='7.0.0-28-generic', version='#28~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Wed Jul  1 15:50:57 UTC 2', machine='x86_64')},\n {'simd_extensions': {'baseline': ['SSE', 'SSE2', 'SSE3'],\n                      'found': ['SSSE3',\n                                'SSE41',\n                                'POPCNT',\n                                'SSE42',\n                                'AVX',\n                                'F16C',\n                                'FMA3',\n                                'AVX2',\n                                'AVX512F',\n                                'AVX512CD',\n                                'AVX512_SKX',\n                                'AVX512_CLX',\n                                'AVX512_CNL',\n                                'AVX512_ICL'],\n                      'not_found': ['AVX512_KNL', 'AVX512_KNM']}}]"
+        "numpy_build_summary": {
+          "blas": "scipy-openblas",
+          "lapack": "scipy-openblas",
+          "openblas_version": "0.3.29",
+          "integer_interface": "64-bit",
+          "build_configuration": "DYNAMIC_ARCH NO_AFFINITY Haswell MAX_THREADS=64",
+          "c_compiler": "gcc 10.2.1",
+          "cxx_compiler": "gcc 10.2.1",
+          "cython": "3.1.0"
+        },
+        "numpy_runtime_summary": {
+          "threadpoolctl_available": false,
+          "simd_extensions": {
+            "baseline": [
+              "SSE",
+              "SSE2",
+              "SSE3"
+            ],
+            "found": [
+              "SSSE3",
+              "SSE41",
+              "POPCNT",
+              "SSE42",
+              "AVX",
+              "F16C",
+              "FMA3",
+              "AVX2",
+              "AVX512F",
+              "AVX512CD",
+              "AVX512_SKX",
+              "AVX512_CLX",
+              "AVX512_CNL",
+              "AVX512_ICL"
+            ],
+            "not_found": [
+              "AVX512_KNL",
+              "AVX512_KNM"
+            ]
+          }
+        }
       }
     },
     "execution_tools": {
@@ -103,7 +141,7 @@
       "failed": 0,
       "skipped": 1,
       "skip_reasons": [
-        "Windows directory junction behavior"
+        "Non-Linux directory-junction behavior; platform-specific test not executed on this Linux host."
       ]
     },
     "required_target_and_linux": [
@@ -171,10 +209,10 @@
       "failed": 0,
       "skipped": 1,
       "skip_reasons": [
-        "Windows Job ownership regression"
+        "Non-Linux process-job ownership; platform-specific test not executed on this Linux host."
       ]
     },
-    "note": "Suites overlap; counts are not additive."
+    "note": "Suites overlap; counts are not additive. Skip reasons are platform-neutral semantic summaries rather than verbatim JUnit messages."
   },
   "w4": {
     "executed_commit": "01aff1df755f6c049c5086cd8434ddf670a59f2a",
@@ -297,5 +335,17 @@
     "Remote Nightly execution",
     "Independent team reproduction and acceptance",
     "W5 text generation"
-  ]
+  ],
+  "publication": {
+    "kind": "redacted evidence summary, not an original execution report",
+    "path_base": "repository root; output paths index external run artifacts and do not imply files are tracked in Git",
+    "redaction": [
+      "Executable and shared-library paths are repository-relative.",
+      "Host name and free-form NumPy build/runtime dumps containing machine or build paths are omitted; relevant versions, BLAS and SIMD details are retained as structured summaries.",
+      "Skip reasons are semantic summaries, not verbatim JUnit messages; counts and unexecuted platform coverage are preserved."
+    ],
+    "original_reports_unchanged": true,
+    "recorded_file_hashes_unchanged": true,
+    "current_commit_scope": "source state when this fixed evidence summary was first assembled; each run retains its own executed_commit"
+  }
 }

@@ -65,8 +65,7 @@ PY
 ```
 
 模型下载复用 W1 的固定清单，不重新导出或替换成小模型。测试命令与分层验收见
-[验证说明](validation.md)。Windows 可使用同一 Python 模块入口，但须提供实际 Zig 和
-QEMU 的路径并使用适合 PowerShell 的环境变量语法；Linux 的 apt/Bash 命令不能原样照搬。
+[验证说明](validation.md)。完整复现使用本节准备的 Linux 工具链，并记录实际工具版本与摘要。
 
 ## 完整运行与复核
 
