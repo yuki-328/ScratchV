@@ -117,6 +117,75 @@ class _Process:
         self.returncode = -9
 
 
+@pytest.mark.parametrize("outcome", ["success", "nonzero", "timeout", "nonfinite", "cleanup"])
+def test_quit_without_reply_still_requires_exit_output_and_cleanup(tmp_path, monkeypatch, outcome):
+    """A missing quit acknowledgement never replaces the runner's gates."""
+    executable = _stub_executable(tmp_path)
+    out = tmp_path / "run"
+    events = []
+    process = _Process()
+    first_wait = True
+
+    def wait(timeout):
+        nonlocal first_wait
+        events.append("wait")
+        if first_wait and outcome == "timeout":
+            first_wait = False
+            raise subprocess.TimeoutExpired("stub-qemu", timeout)
+        if process.returncode is None:
+            process.returncode = 7 if outcome == "nonzero" else 0
+        return process.returncode
+
+    process.wait = wait
+
+    def launch(*args, cwd, **kwargs):
+        (Path(cwd) / "uart.bin").write_bytes(runtime.FRAME.pack(runtime.MAGIC, 0, 4))
+        return process
+
+    class QMP:
+        def __init__(self, *args):
+            pass
+
+        def command(self, command, *args):
+            events.append(command)
+            if command == "human-monitor-command":
+                value = np.nan if outcome == "nonfinite" else 1.0
+                (out / "output.bin").write_bytes(np.array([value], dtype="<f4").tobytes())
+                return ""
+            return None if command == "quit" else {}
+
+        def close(self):
+            events.append("close")
+
+    def cleanup(*args):
+        events.append("transport-cleanup")
+        if outcome == "cleanup":
+            raise OSError("injected transport cleanup failure")
+
+    monkeypatch.setattr(runtime.subprocess, "Popen", launch)
+    monkeypatch.setattr(runtime, "QMP", QMP)
+    monkeypatch.setattr(runtime, "_windows_job", lambda process: None)
+    monkeypatch.setattr(runtime, "_stop_process_tree", lambda process, job: process.kill())
+    monkeypatch.setattr(runtime, "_QemuMemoryMonitor", lambda process: SimpleNamespace(
+        start=lambda: None, close=lambda: None, report=lambda: {}))
+    monkeypatch.setattr(runtime, "remove_transport", cleanup)
+    if outcome == "success":
+        output, report = run_external(executable, {"x": np.ones(1, np.float32)}, out)
+        np.testing.assert_array_equal(output, [1.0])
+        assert report["passed"] and report["exit_code"] == 0
+        assert "transport-cleanup" in events
+    else:
+        expected = {"nonzero": RuntimeError, "timeout": subprocess.TimeoutExpired,
+                    "nonfinite": ValueError, "cleanup": RuntimeError}[outcome]
+        with pytest.raises(expected):
+            run_external(executable, {"x": np.ones(1, np.float32)}, out)
+    report = json.loads((out / "run.json").read_text())
+    assert report["guest_completed"] and report["qmp_quit_reply_received"] is False
+    assert report["passed"] is (outcome == "success")
+    assert events.index("human-monitor-command") < events.index("quit") < events.index("wait")
+    assert "close" in events
+
+
 def test_qmp_close_failure_keeps_primary_and_attempts_all_cleanup(tmp_path, monkeypatch):
     executable = _stub_executable(tmp_path)
     events = []

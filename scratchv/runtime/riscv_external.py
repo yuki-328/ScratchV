@@ -245,7 +245,9 @@ class QMP:
     def read(self):
         self.socket.settimeout(self.remaining())
         line = self.stream.readline(1024 * 1024)
-        if not line or len(line) >= 1024 * 1024:
+        if not line:
+            raise EOFError("QMP connection closed before response")
+        if len(line) >= 1024 * 1024 or not line.endswith(b"\n"):
             raise RuntimeError("Truncated/oversized QMP response")
         return json.loads(line)
 
@@ -254,9 +256,22 @@ class QMP:
         request = {"execute": name, "id": self.serial}
         if arguments is not None:
             request["arguments"] = arguments
-        self.stream.write(json.dumps(request).encode() + b"\n")
+        payload = json.dumps(request).encode() + b"\n"
+        self.socket.settimeout(self.remaining())
+        if self.stream.write(payload) != len(payload):
+            raise RuntimeError("Incomplete QMP command write")
         while True:
-            result = self.read()
+            try:
+                result = self.read()
+            except (EOFError, ConnectionResetError):
+                # QMP quit may terminate QEMU before its reply is delivered:
+                # https://www.qemu.org/docs/master/interop/qemu-qmp-ref.html#command-quit
+                # Only a completely written, argument-free quit gets this
+                # exception. The caller must still require a normal process
+                # exit and validate the completed output and resource cleanup.
+                if name == "quit" and arguments is None:
+                    return None
+                raise
             if result.get("id") == self.serial:
                 if "error" in result:
                     raise RuntimeError(f"QMP {name}: {result['error']}")
@@ -450,7 +465,7 @@ def run_external(executable, inputs, run_dir, *, timeout=3600.0):
             if output_path.stat().st_size != executable.output.nbytes:
                 raise ValueError("Output dump size mismatch")
             report["output_dump_s"] = time.perf_counter() - dump_started
-            qmp.command("quit")
+            report["qmp_quit_reply_received"] = qmp.command("quit") is not None
             process.wait(timeout=min(10, max(0.1, deadline - time.monotonic())))
             qemu_exited = time.perf_counter()
             if process.returncode:

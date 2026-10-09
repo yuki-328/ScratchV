@@ -202,6 +202,79 @@ def test_qmp_error_response_is_not_a_successful_memory_dump():
             client.close()
 
 
+@pytest.mark.parametrize("command", ["quit", "stop", "human-monitor-command"])
+@pytest.mark.parametrize("disconnect", ["eof", "reset"])
+def test_qmp_disconnect_is_allowed_only_after_sending_quit(monkeypatch, command, disconnect):
+    def respond(request, send):
+        assert request["execute"] == command
+        # Leave without a command response, as QEMU's documented quit permits.
+    with _qmp_server(respond) as port:
+        client = runtime.QMP(port, time.monotonic() + 5)
+        if disconnect == "reset":
+            def reset():
+                raise ConnectionResetError("peer reset while reading reply")
+            monkeypatch.setattr(client, "read", reset)
+        try:
+            if command == "quit":
+                assert client.command(command) is None
+            else:
+                with pytest.raises(EOFError if disconnect == "eof" else ConnectionResetError):
+                    client.command(command)
+        finally:
+            client.close()
+
+
+def test_qmp_quit_error_reply_is_not_accepted_as_shutdown():
+    def respond(request, send):
+        send({"error": {"class": "GenericError", "desc": "quit rejected"},
+              "id": request["id"]})
+    with _qmp_server(respond) as port:
+        client = runtime.QMP(port, time.monotonic() + 5)
+        try:
+            with pytest.raises(RuntimeError, match="quit rejected"):
+                client.command("quit")
+        finally:
+            client.close()
+
+
+@pytest.mark.parametrize("failure", ["send-reset", "short-write", "timeout", "malformed", "arguments"])
+def test_qmp_quit_does_not_hide_send_protocol_or_timeout_errors(failure):
+    client = runtime.QMP.__new__(runtime.QMP)
+    client.serial, client.deadline = 0, time.monotonic() + 5
+    client.socket = SimpleNamespace(settimeout=lambda timeout: None)
+    writes = []
+
+    def write(payload):
+        writes.append(json.loads(payload))
+        if failure == "send-reset":
+            raise ConnectionResetError("quit was not sent")
+        return len(payload) - (failure == "short-write")
+
+    def read():
+        if failure == "timeout":
+            raise TimeoutError("quit reply timed out")
+        if failure == "malformed":
+            raise ValueError("malformed reply")
+        raise EOFError("peer closed")
+
+    client.stream = SimpleNamespace(write=write)
+    client.read = read
+    expected = {"send-reset": ConnectionResetError, "short-write": RuntimeError,
+                "timeout": TimeoutError, "malformed": ValueError, "arguments": EOFError}[failure]
+    with pytest.raises(expected):
+        client.command("quit", {} if failure == "arguments" else None)
+    assert writes[0]["execute"] == "quit"
+
+
+def test_qmp_read_rejects_incomplete_reply_even_if_json_is_valid():
+    client = runtime.QMP.__new__(runtime.QMP)
+    client.deadline = time.monotonic() + 5
+    client.socket = SimpleNamespace(settimeout=lambda timeout: None)
+    client.stream = SimpleNamespace(readline=lambda limit: b'{"return": {}, "id": 1}')
+    with pytest.raises(RuntimeError, match="Truncated"):
+        client.read()
+
+
 @pytest.mark.parametrize("failure", ["malformed_greeting", "capability_error", "capability_timeout"])
 def test_qmp_constructor_closes_connection_when_handshake_fails(failure):
     listener = socket.socket()
